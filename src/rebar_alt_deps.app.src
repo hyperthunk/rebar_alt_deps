@@ -1,0 +1,9 @@
+{application, rebar_alt_deps,
+ [
+  {description, ""},
+  {vsn, "0.0.1"},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]}
+ ]}.
