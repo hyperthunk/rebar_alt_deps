@@ -26,7 +26,12 @@
 -export(['post_install-deps'/2]).
 
 'install-deps'(Config, _) ->
-    rebar_core:process_commands(['get-deps'], Config),
+    case rebar_config:get_local(Config, 'alt_install_trigger', false) of
+        true ->
+            rebar_core:process_commands(['get-deps'], Config);
+        false ->
+            ok
+    end,
     {ok, DepsDir, Excl} = install_alt_remotes(Config),
     case file:list_dir(DepsDir) of
         {ok, Dirs} ->
@@ -50,6 +55,7 @@
             rebar_file_utils:rm_rf(WorkDir)
     end,
     ok.
+
 %%
 %% Internal API
 %%
@@ -61,6 +67,7 @@ process_dir(Dir, Config, Excl) ->
         Basename = filename:basename(Dir),
         case lists:member(Basename, Excl) of
             true ->
+                rebar_log:log(debug, "Excluding ~s~n", [Basename]),
                 ok;
             false ->
                 rebar_core:process_commands([compile], Config)
@@ -83,14 +90,25 @@ install_alt_remotes(Config) ->
     {ok, DepsDir, Excl}.
 
 find_deps(DepsDir, Config) ->
-    RawDeps = rebar_config:get_local(Config, deps, []) ++ 
-              rebar_config:get_local(Config, alt_deps, []),
+    RebarDeps = rebar_config:get_local(Config, deps, []),
+    AltDeps = rebar_config:get_local(Config, alt_deps, []),
 
     %% we do not handle deps with a given source directory - these are
     %% dealt with by rebar as usual
-    ManagedDeps = [ AppVsn || {_App, _Vsn}=AppVsn <- RawDeps ],
-    [ load_if_possible(DepsDir, AppVsn) || {_App, _Vsn}=AppVsn <- RawDeps ].
+    ManagedDeps = [ load_if_possible(DepsDir, AppVsn) || 
+                                        {_App, _Vsn}=AppVsn <- RebarDeps ],
 
+    [ load_if_possible(DepsDir, AppVsn) || AppVsn <- AltDeps ] ++ ManagedDeps.
+
+load_if_possible(DepsDir, {App, Vsn, _}=Spec) ->
+    BasePath = filename:join(DepsDir, atom_to_list(App)),
+    rebar_log:log(debug, "Searching ~s for ~p~n", [BasePath, App]),
+    case filelib:is_dir(BasePath) of
+        true ->
+            {true, BasePath};
+        false ->
+            {false, Spec, missing}
+    end;
 load_if_possible(DepsDir, {App, Vsn}=Spec) ->
     BasePath = filename:join(DepsDir, atom_to_list(App)),
     rebar_log:log(debug, "Searching ~s for ~p-~s~n", [BasePath, App, Vsn]),
@@ -108,21 +126,22 @@ load_if_possible(DepsDir, {App, Vsn}=Spec) ->
 
 install_missing_deps(_DepsDir, [], Loaded, _Config) ->
     Loaded;
-install_missing_deps(DepsDir, [{App, _}=Spec|Missing], SoFar, Config) ->
+install_missing_deps(DepsDir, [Spec|Missing], SoFar, Config) ->
     AltConfig = rebar_config:get_local(Config, alt_repositories, []),
+    App = element(1, Spec),
     {App, AltDep} = lists:keyfind(App, 1, AltConfig),
     Loaded = alt_load(DepsDir, Spec, AltDep, Config),
     install_missing_deps(DepsDir, Missing, [Loaded|SoFar], Config).
 
 alt_load(_, Spec, false, _) ->
     {noconfig, Spec};
-alt_load(DepsDir, {_, Vsn, alien}=AppSpec, {Repo, Author}, Config) ->
+alt_load(DepsDir, {_, Vsn, skip_build}=AppSpec, {Repo, Author}, Config) ->
     alt_load(DepsDir, AppSpec, {Repo, Author, Vsn}, Config);
 alt_load(DepsDir, {_, Vsn}=AppSpec, {Repo, Author}, Config) ->
     alt_load(DepsDir, AppSpec, {Repo, Author, Vsn}, Config);
 alt_load(DepsDir, {App, Vsn}, {Repo, Author, Tag}, Config) ->
     alt_load(DepsDir, {App, Vsn, undefined}, {Repo, Author, Tag}, Config);
-alt_load(DepsDir, {App, Vsn, Alien}, {Repo, Author, Tag}, Config) ->
+alt_load(DepsDir, {App, Vsn, Skip}, {Repo, Author, Tag}, Config) ->
     WorkDir = filename:join(rebar_utils:get_cwd(),
                     rebar_config:get_local(Config, alt_tmp_dir, ".altdeps")),
     AppName = atom_to_list(App) ++ "-" ++ Vsn,
@@ -138,7 +157,7 @@ alt_load(DepsDir, {App, Vsn, Alien}, {Repo, Author, Tag}, Config) ->
                                   "Unable to extract archive ~s: ~p~n",
                                   [Target, Reason]);
                 {ok, FileList} ->
-                    Processed =
+%                    Processed =
 %                    rebar_log:log(debug, "FileList: ~p~n", [Processed]),
 %                    Source = filename:join(WorkDir,
 %                                           filename:basename(Target, ".zip")),
@@ -147,8 +166,8 @@ alt_load(DepsDir, {App, Vsn, Alien}, {Repo, Author, Tag}, Config) ->
                     Dest = filename:join(DepsDir, atom_to_list(App)),
                     [ rebar_file_utils:mv(F, 
                         rename(F, Dest, WorkDir)) || F <- FileList ],
-                    case Alien of
-                        alien ->
+                    case Skip of
+                        skip_build ->
                             {exclude, filename:basename(Dest)};
                         _ ->
                             ok
