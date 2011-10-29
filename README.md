@@ -8,6 +8,14 @@ dependencies which are not compatible with rebar (for whatever reason).
 Currently the only type of dependencies that are supported are explicit tags
 for repositories hosted in either *github* or *bitbucket*.
 
+## Notices/Caveats
+
+This plugin relies on a feature which is currently sitting in the official 
+rebar repository as a pull request. Until this is merged, you will need to use
+[this fork of rebar](https://github.com/hyperthunk/rebar/tree/pub-cmd-alt-deps)
+in order to utilise the plugin. There is no guarantee that the pull request will
+be accepted, so this plugin will remain *experimental* until such time as it is.
+
 ## Sample usage
 
 See the `examples` folder for some of the use-cases.
