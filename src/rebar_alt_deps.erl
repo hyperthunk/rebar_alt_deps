@@ -98,12 +98,12 @@ find_deps(DepsDir, Config) ->
 
     %% we do not handle deps with a given source directory - these are
     %% dealt with by rebar as usual
-    ManagedDeps = [ load_if_possible(DepsDir, AppVsn) || 
+    ManagedDeps = [ load_if_possible(DepsDir, AppVsn) ||
                                         {_App, _Vsn}=AppVsn <- RebarDeps ],
 
     [ load_if_possible(DepsDir, AppVsn) || AppVsn <- AltDeps ] ++ ManagedDeps.
 
-load_if_possible(DepsDir, {App, Vsn, _}=Spec) ->
+load_if_possible(DepsDir, {App, _Vsn, _}=Spec) ->
     BasePath = filename:join(DepsDir, atom_to_list(App)),
     rebar_log:log(debug, "Searching ~s for ~p~n", [BasePath, App]),
     case filelib:is_dir(BasePath) of
@@ -159,21 +159,17 @@ alt_load(DepsDir, {App, Vsn, Skip}, {Repo, Author, Tag}, Config) ->
         {error, Error} ->
             rebar_log:log(warn, "Unable to load ~s: ~p~n", [AppName, Error]);
         {ok, Target} ->
-            case zip:extract(Target, [{cwd, WorkDir}]) of
+            case zip:extract(Target, [memory]) of
                 {error, Reason} ->
                     rebar_log:log(warn,
                                   "Unable to extract archive ~s: ~p~n",
                                   [Target, Reason]);
                 {ok, FileList} ->
-%                    Processed =
-%                    rebar_log:log(debug, "FileList: ~p~n", [Processed]),
-%                    Source = filename:join(WorkDir,
-%                                           filename:basename(Target, ".zip")),
-%                    Dest = filename:join([rebar_utils:get_cwd(),
-%                                         DepsDir, AppName]),
                     Dest = filename:join(DepsDir, atom_to_list(App)),
-                    [ rebar_file_utils:mv(F, 
-                        rename(F, Dest, WorkDir)) || F <- FileList ],
+                    [ file:write_file(rename(Path, Dest), Data, [write]) ||
+                                                    {Path, Data} <- FileList ],
+                    %[ rebar_file_utils:mv(F,
+                    %    rename(F, Dest, WorkDir)) || F <- FileList ],
                     case Skip of
                         skip_build ->
                             {exclude, filename:basename(Dest)};
@@ -183,11 +179,17 @@ alt_load(DepsDir, {App, Vsn, Skip}, {Repo, Author, Tag}, Config) ->
             end
     end.
 
-rename(FN, Dest, WorkDir) ->
-    NewFN = filename:join([Dest] ++ 
-        erlang:tl(filename:split(FN -- (WorkDir ++ "/" )))),
-    rebar_utils:ensure_dir(NewFN),
-    NewFN.
+rename(Path, Dest) ->
+    [_|P] = filename:split(Path),
+    Target = filename:join(Dest, filename:join(P)),
+    rebar_utils:ensure_dir(Target),
+    Target.
+
+%rename(FN, Dest, WorkDir) ->
+%    NewFN = filename:join([Dest] ++
+%        erlang:tl(filename:split(FN -- (WorkDir ++ "/" )))),
+%    rebar_utils:ensure_dir(NewFN),
+%    NewFN.
 
 make_url(bitbucket, Author, App, Vsn) ->
     "https://bitbucket.org/" ++ Author ++ "/" ++
@@ -196,10 +198,10 @@ make_url(github, Author, App, Vsn) ->
     "https://github.com/" ++ Author ++ "/" ++
     atom_to_list(App) ++ "/zipball/" ++ Vsn.
 
-matching_dirs(F, ManagedDeps) ->
-    lists:filter(fun({App, _Vsn}) ->
-                    lists:prefix(atom_to_list(App), F)
-                end, ManagedDeps).
+%matching_dirs(F, ManagedDeps) ->
+%    lists:filter(fun({App, _Vsn}) ->
+%                    lists:prefix(atom_to_list(App), F)
+%                end, ManagedDeps).
 
 is_app_available(App, VsnRegex, Path) ->
     rebar_log:log(debug, "Searching for ~p(~~ ~s) in ~s~n", [App, VsnRegex, Path]),
