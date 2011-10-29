@@ -62,6 +62,7 @@
 
 process_dir(Dir, Config, Excl) ->
     Origin = rebar_utils:get_cwd(),
+    %rebar_log:log(debug, "Processing ~s~n", [Dir]),
     file:set_cwd(Dir),
     try
         Basename = filename:basename(Dir),
@@ -70,7 +71,9 @@ process_dir(Dir, Config, Excl) ->
                 rebar_log:log(debug, "Excluding ~s~n", [Basename]),
                 ok;
             false ->
-                rebar_core:process_commands([compile], Config)
+                rebar_core:skip_dir(Origin),
+                rebar_core:process_commands([compile], Config),
+                erlang:erase({skip_dir, Origin})
         end
     catch _:Err ->
         rebar_log:log(warn, "Unable to process directory ~s: ~p~n", [Dir, Err])
@@ -132,6 +135,11 @@ install_missing_deps(DepsDir, [Spec|Missing], SoFar, Config) ->
     {App, AltDep} = lists:keyfind(App, 1, AltConfig),
     Loaded = alt_load(DepsDir, Spec, AltDep, Config),
     install_missing_deps(DepsDir, Missing, [Loaded|SoFar], Config).
+
+%% TODO: add support for nexus
+%% TODO: add support for erlware repos
+%% TODO: add support for explicit URLs
+%% TODO: integrate rebar_deps support for git/hg/svn
 
 alt_load(_, Spec, false, _) ->
     {noconfig, Spec};
