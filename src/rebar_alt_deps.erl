@@ -266,8 +266,8 @@ is_app_available(App, VsnRegex, Path) ->
             {false, {missing_app_file, Path}}
     end.
 
-fetch({{scm, git}, Repo, {tag, Tag}}, Target, Config) ->
-    case fetch({git, Repo, "HEAD"}, Target, Config) of
+fetch({{scm, git}=SCM, Repo, {tag, Tag}}, Target, Config) ->
+    case fetch({SCM, Repo, "master"}, Target, Config) of
         {dir, Target} ->
             case rebar_utils:sh("git checkout -q " ++ Tag, [{cd, Target}]) of
                 {ok, _} -> {dir, Target};
