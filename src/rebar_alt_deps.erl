@@ -28,13 +28,9 @@
 'install-deps'(Config, _) ->
     rebar_log:log(warn, "Hitting ~s~n", [rebar_utils:get_cwd()]),
 	{ok, DepsDir, Deps} = install_alt_remotes(Config),
-    rebar_plugin_manager:once(install_deps,
-        fun() ->
-            rebar_plugin_manager:do_in_deps_dir(DepsDir,
-                fun(Dir) ->
-                    process_dir(filename:join(DepsDir, Dir), Deps, Config)
-                end
-            )
+    rebar_plugin_manager:do_in_deps_dir(DepsDir,
+        fun(Dir) ->
+            process_dir(filename:join(DepsDir, Dir), Deps, Config)
         end
     ),
     ok.
@@ -83,11 +79,11 @@ process_dir(Dir, Deps, Config) ->
             try
                 rebar_log:log(info, "Executing ~p in ~s~n", [Command, Dir]),
                 file:set_cwd(Dir),
-                rebar_core:skip_dir(Origin),
-                rebar_core:process_commands([Command], Config),
+                rebar_core:skip_dir(Origin), %% erm, why?
                 rebar_config:set_global({?MODULE, installed},
                                         [Basename|Installed]),
-                'install-deps'(rebar_config:new(Config), undefined)
+                'install-deps'(rebar_config:new(Config), undefined),
+                rebar_core:process_commands([Command], Config)
             catch _:Err ->
                 rebar_log:log(warn, "Unable to process directory ~s: ~p~n",
                               [Dir, Err])
@@ -109,12 +105,7 @@ install_alt_remotes(Config) ->
 find_deps(DepsDir, Config) ->
     RebarDeps = rebar_config:get_local(Config, deps, []),
     AltDeps = rebar_config:get_local(Config, alt_deps, []),
-
-    %% we do not handle deps with a given source directory - these are
-    %% dealt with by rebar as usual
-    ManagedDeps = [ load_if_possible(DepsDir, AppVsn) ||
-                                        {_App, _Vsn}=AppVsn <- RebarDeps ],
-
+    ManagedDeps = [ load_if_possible(DepsDir, AppSpec) || AppSpec <- RebarDeps ],
     {RebarDeps ++ AltDeps,
         [ load_if_possible(DepsDir, AppVsn) ||
                         AppVsn <- AltDeps ] ++ ManagedDeps}.
@@ -155,9 +146,40 @@ install_missing_deps(_DepsDir, [], Loaded, _Config) ->
 install_missing_deps(DepsDir, [Spec|Missing], SoFar, Config) ->
     AltConfig = rebar_config:get_local(Config, alt_repositories, []),
     App = element(1, Spec),
-    {App, AltDep} = lists:keyfind(App, 1, AltConfig),
-    Loaded = alt_load(DepsDir, Spec, AltDep, Config),
-    install_missing_deps(DepsDir, Missing, [Loaded|SoFar], Config).
+    case lists:keyfind(App, 1, AltConfig) of
+        {App, AltDep} ->
+            Loaded = alt_load(DepsDir, Spec, AltDep, Config),
+            install_missing_deps(DepsDir, Missing, [Loaded|SoFar], Config);
+        false ->
+            case Spec of
+                {_App, _Vsn} ->
+                    possibly_fail_missing(Spec, Config);
+                {App, _Vsn, AltBuildCmd} when is_atom(AltBuildCmd) ->
+                    possibly_fail_missing(Spec, Config);
+                {App, Vsn, {Scm, Repo}} ->
+                    Loaded = alt_load(DepsDir, {App, Vsn}, {{scm, Scm},
+                                        Repo, default_checkout(Scm)}, Config),
+                    install_missing_deps(DepsDir, Missing,
+                                            [Loaded|SoFar], Config);
+                {App, AppVsn, {Scm, Repo, Checkout}} ->
+                    Loaded = alt_load(DepsDir, {App, AppVsn}, {{scm, Scm},
+                                        Repo, Checkout}, Config),
+                    install_missing_deps(DepsDir, Missing,
+                                            [Loaded|SoFar], Config)
+            end
+    end.
+
+default_checkout(git) -> "master";
+default_checkout(hg) -> "tip".
+
+possibly_fail_missing(Spec, Config) ->
+    case rebar_config:get_local(Config,
+                                ignore_missing_deps, false) of
+        true ->
+            {missing, Spec};
+        false ->
+            rebar_utils:abort("Unable to install ~p~n", [Spec])
+    end.
 
 %% TODO: add support for nexus
 %% TODO: add support for erlware repos
