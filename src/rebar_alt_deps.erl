@@ -22,30 +22,21 @@
 %% -----------------------------------------------------------------------------
 -module(rebar_alt_deps).
 
--export([preprocess/2]).
 -export(['install-deps'/2]).
 -export(['post_install-deps'/2]).
 
-preprocess(Config, _) ->
-    case rebar_config:get_global(alt_deps_dir, undefined) of
-        undefined ->
-            Dir = rebar_config:get_local(Config, alt_deps_dir,
-                        rebar_config:get_local(Config, deps_dir, "deps")),
-            rebar_config:set_global(alt_deps_dir, filename:absname(Dir));
-        _Dir ->
-            ok
-    end,
-    {ok, []}.
-
 'install-deps'(Config, _) ->
-    {ok, DepsDir, Deps} = install_alt_remotes(Config),
-    case file:list_dir(DepsDir) of
-        {ok, Dirs} ->
-            [ process_dir(filename:join(DepsDir, Dir),
-                            Deps, Config) || Dir <- Dirs ];
-        {error, Err} ->
-            rebar_log:log(warn, "Unable to process deps: ~p~n", [Err])
-    end,
+    rebar_log:log(warn, "Hitting ~s~n", [rebar_utils:get_cwd()]),
+	{ok, DepsDir, Deps} = install_alt_remotes(Config),
+    rebar_plugin_manager:once(install_deps,
+        fun() ->
+            rebar_plugin_manager:do_in_deps_dir(DepsDir,
+                fun(Dir) ->
+                    process_dir(filename:join(DepsDir, Dir), Deps, Config)
+                end
+            )
+        end
+    ),
     ok.
 
 'post_install-deps'(Config, _) ->
@@ -334,4 +325,3 @@ fetch(("http" ++ _)=Url, Target, Config) ->
             rebar_log:log(warn, "Error trying to load remote: ~p~n", [Error]),
             {error, Error}
     end.
-
